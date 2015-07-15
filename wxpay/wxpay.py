@@ -13,6 +13,11 @@ from urlparse import urljoin
 from xml.etree import ElementTree as ET
 
 
+class NoBillExistException(Exception):
+    """无账单时抛出的异常"""
+    pass
+
+
 class WeixinPayClient(object):
     """微信支付客户端
 
@@ -119,10 +124,14 @@ class WeixinPayBillClient(WeixinPayClient):
 
         self._table_header = []
 
-    def get_bill(self, date_string):
+    def get_bill(self, date_string, nobillexception=False):
         """获取账单
 
+        当nobillexception为True时，账单不存在时会抛出NoBillExistException,
+        否则返回空字符串
+
         :param date_string: 要获取账单字符串, 格式: %Y%m%d
+        :param nobillexception: 是否抛出NoBillExistException异常
         :return: 返回账单正文，无账单会返回空字符串
         """
         datetime.datetime.strptime(date_string, "%Y%m%d")
@@ -137,7 +146,18 @@ class WeixinPayBillClient(WeixinPayClient):
             para["sub_mch_id"] = self._sub_mch_id
         content = self._post(self._url, para)
         if content.find("<xml>") != -1:
-            return ""
+            for node in ET.fromstring(content).getchildren():
+                if node.tag == 'return_msg':
+                    msg = node.text
+                    if msg == 'No Bill Exist':
+                        if nobillexception:
+                            raise NoBillExistException()
+                        else:
+                            return ""
+                    break
+            else:
+                msg = u'未知错误'
+            raise Exception(msg)
         else:
             return content
 
@@ -209,7 +229,12 @@ if __name__ == "__main__":
         "key": ""
     }
 
-    date = datetime.date.today() - datetime.timedelta(i)
-    bill_client = WeixinPayBillClient(**WXPAY_CONF)
-    for record in bill_client.get_trade_iterator(date.strftime("%Y%m%d")):
-        print record
+    date = datetime.date.today()
+    for i in range(2):
+        d = date-datetime.timedelta(i+1)
+        bill_client = WeixinPayBillClient(**WXPAY_CONF)
+        count = 0
+        for i in bill_client.get_trade_iterator(d.strftime("%Y%m%d")):
+            print i
+            count += 1
+        print count
